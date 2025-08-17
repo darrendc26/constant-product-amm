@@ -50,7 +50,8 @@ pub fn add_liquidity_handler(ctx: Context<AddLiquidity>, amount_a: u64, amount_b
     let seeds = &[
         b"pool".as_ref(),
         pool.token_a.as_ref(),
-        pool.token_b.as_ref()
+        pool.token_b.as_ref(),
+        &[pool.bump]
     ];
     let signer = &[&seeds[..]];
 
