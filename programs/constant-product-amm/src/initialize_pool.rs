@@ -39,6 +39,6 @@ pub fn initialize_pool_handler(ctx: Context<InitializePool>) -> Result<()> {
     pool.total_lp = 0;
     pool.fee = 0;
     pool.k = 0;
-    pool.bump = *ctx.bumps.get("pool").unwrap();
+    pool.bump = ctx.bumps.pool;
     Ok(())
 }
