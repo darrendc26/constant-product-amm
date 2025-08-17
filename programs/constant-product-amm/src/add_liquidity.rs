@@ -3,6 +3,7 @@ use anchor_spl::token::{Token, TokenAccount, Mint, transfer, Transfer, mint_to, 
 use anchor_spl::associated_token::AssociatedToken;
 use crate::pool::Pool;
 use crate::utilities::add_liquidity_helper;
+use crate::errors::ErrorCode;
 
 #[derive(Accounts)]
 pub struct AddLiquidity<'info> {
@@ -57,8 +58,8 @@ pub fn add_liquidity_handler(ctx: Context<AddLiquidity>, amount_a: u64, amount_b
 
     // Transfer user's token A to vault
     let cpi_accounts = Transfer {
-        from: ctx.accounts.token_a.to_account_info(),
-        to: ctx.accounts.user_token_a.to_account_info(),
+        from: ctx.accounts.user_token_a.to_account_info(),
+        to: ctx.accounts.token_a_vault.to_account_info(),
         authority: ctx.accounts.user.to_account_info(),
     };
     let cpi_program = ctx.accounts.token_program.to_account_info();
@@ -80,11 +81,16 @@ pub fn add_liquidity_handler(ctx: Context<AddLiquidity>, amount_a: u64, amount_b
     let cpi_accounts = MintTo {
         mint: ctx.accounts.lp_token_mint.to_account_info(),
         to: ctx.accounts.user_lp.to_account_info(),
-        authority: ctx.accounts.authority.to_account_info(),
+        authority: pool.to_account_info(),
     };
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
     mint_to(cpi_ctx, lp_tokens)?;
+
+    pool.total_lp = pool.total_lp.checked_add(lp_tokens).ok_or(ErrorCode::MathOverflow)?;
+    pool.total_a_token = pool.total_a_token.checked_add(amount_a).ok_or(ErrorCode::MathOverflow)?;
+    pool.total_b_token = pool.total_b_token.checked_add(amount_b).ok_or(ErrorCode::MathOverflow)?;
+    pool.k = pool.total_a_token.checked_mul(pool.total_b_token).ok_or(ErrorCode::MathOverflow)?;
 
     Ok(())
 }

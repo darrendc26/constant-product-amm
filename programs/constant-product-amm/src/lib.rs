@@ -7,6 +7,7 @@ pub mod pool;
 pub mod initialize_pool;
 pub mod add_liquidity;
 pub mod swap;
+pub mod remove_liquidity;
 pub mod errors;
 
 use initialize_pool::*;

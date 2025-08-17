@@ -6,4 +6,6 @@ pub enum ErrorCode {
     MathOverflow,
     #[msg("Insufficient Amount")]
     InsufficientAmount,
+    #[msg("Invalid Swap Amount")]
+    InvalidSwapAmount,
 }

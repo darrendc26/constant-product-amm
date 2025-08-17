@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{ Transfer, TokenAccount, transfer, Token};
+use anchor_spl::token::{ Transfer, TokenAccount, transfer, Token, Mint};
+use anchor_spl::associated_token::AssociatedToken;
 use crate::pool::Pool;
 use crate::utilities::swap_helper;
 use crate::errors::ErrorCode;
@@ -25,90 +26,106 @@ pub struct Swap<'info> {
     pub token_a_vault: Account<'info, TokenAccount>,
     pub token_b_vault: Account<'info, TokenAccount>,
     pub fee_vault: Account<'info, TokenAccount>,
-    #[account(mut)]
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = token_a_mint,
+        associated_token::authority = user
+    )]
     pub user_token_a: Account<'info, TokenAccount>,
-    #[account(mut)]
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = token_b_mint,  
+        associated_token::authority = user
+    )]
     pub user_token_b: Account<'info, TokenAccount>,
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
 }
-
-pub fn swap_handler(ctx: Context<Swap>, amount_in: u64, a_to_b : bool) -> Result<()> {
+pub fn swap_handler(ctx: Context<Swap>, amount_in: u64, a_to_b: bool) -> Result<()> {
     let pool = &mut ctx.accounts.pool;
 
+    require!(amount_in > 0, ErrorCode::InvalidSwapAmount);
+
     let amount_out = swap_helper(pool, amount_in, a_to_b);
+    require!(amount_out > 0, ErrorCode::InvalidSwapAmount);
+
     if a_to_b {
-        require!(amount_in > 0, ErrorCode::MathOverflow);
-        require!(amount_out > 0, ErrorCode::MathOverflow);
         require!(amount_out <= pool.total_b_token, ErrorCode::InsufficientAmount);
 
-
         // Transfer token A to vault
+        transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.user_token_a.to_account_info(),
+                    to: ctx.accounts.token_a_vault.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            ),
+            amount_in,
+        )?;
+
+        // Transfer token B to user
+        let seeds = &[
+            b"pool".as_ref(),
+            pool.token_a.as_ref(),
+            pool.token_b.as_ref(),
+            &[pool.bump],
+        ];
+        let signer = &[&seeds[..]];
         let cpi_accounts = Transfer {
-            from: ctx.accounts.user_token_a.to_account_info(),
-            to: ctx.accounts.token_a_vault.to_account_info(),
+            from: ctx.accounts.token_b_vault.to_account_info(),
+            to: ctx.accounts.user_token_b.to_account_info(),
+            authority: pool.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        transfer(cpi_ctx, amount_out)?;
+
+        pool.total_a_token = pool.total_a_token.checked_add(amount_in).unwrap();
+        pool.total_b_token = pool.total_b_token.checked_sub(amount_out).unwrap();
+        
+    } else {
+        require!(amount_out <= pool.total_a_token, ErrorCode::InsufficientAmount);
+
+        // Transfer token B to vault
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.user_token_b.to_account_info(),
+            to: ctx.accounts.token_b_vault.to_account_info(),
             authority: ctx.accounts.user.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
         transfer(cpi_ctx, amount_in)?;
 
-        // Transfer token B to user
-            let seeds = &[
-                b"pool".as_ref(),
-                pool.token_a.as_ref(),
-                pool.token_b.as_ref(),
-                &[pool.bump]
-            ];
-            let signer = &[&seeds[..]];
+        // Transfer token A to user
+        let seeds = &[
+            b"pool".as_ref(),
+            pool.token_a.as_ref(),
+            pool.token_b.as_ref(),
+            &[pool.bump],
+        ];
+        let signer = &[&seeds[..]];
 
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.token_b_vault.to_account_info(),
-                to: ctx.accounts.user_token_b.to_account_info(),
-                authority: ctx.accounts.authority.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            transfer(cpi_ctx, amount_out)?;
+        let cpi_accounts = Transfer {
+                    from: ctx.accounts.token_a_vault.to_account_info(),
+                    to: ctx.accounts.user_token_a.to_account_info(),
+                    authority: pool.to_account_info(),
+                };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        transfer(cpi_ctx, amount_out)?;
 
-            pool.total_a_token = pool.total_a_token.checked_add(amount_in).unwrap();
-            pool.total_b_token = pool.total_b_token.checked_sub(amount_out).unwrap();
-        }
-        else {
-            require!(amount_out <= pool.total_a_token, ErrorCode::InsufficientAmount);
-            require!(amount_in > 0, ErrorCode::MathOverflow);
-            require!(amount_out > 0, ErrorCode::MathOverflow);
-            // Transfer token B to vault
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.user_token_b.to_account_info(),
-                to: ctx.accounts.token_b_vault.to_account_info(),
-                authority: ctx.accounts.user.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-            transfer(cpi_ctx, amount_in)?;
+        pool.total_b_token = pool.total_b_token.checked_add(amount_in).unwrap();
+        pool.total_a_token = pool.total_a_token.checked_sub(amount_out).unwrap();
+    }
 
-            // Transfer token A to user
-            let seeds = &[
-                b"pool".as_ref(),
-                pool.token_a.as_ref(),
-                pool.token_b.as_ref(),
-                &[pool.bump]
-            ];
-            let signer = &[&seeds[..]];
+    pool.k = pool.total_a_token.checked_mul(pool.total_b_token).unwrap();
 
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.token_a_vault.to_account_info(),
-                to: ctx.accounts.user_token_a.to_account_info(),
-                authority: ctx.accounts.authority.to_account_info(),
-            };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            transfer(cpi_ctx, amount_out)?; 
-
-            pool.total_a_token = pool.total_a_token.checked_sub(amount_in).unwrap();
-            pool.total_b_token = pool.total_b_token.checked_add(amount_out).unwrap();
-        }
-            Ok(())
-        }  
-        
+    Ok(())
+}
