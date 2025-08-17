@@ -12,7 +12,6 @@ pub struct InitializePool<'info> {
         space = 8 + Pool::INIT_SPACE,
         seeds = [
             b"pool".as_ref(),
-            authority.key().as_ref(),
             token_a.key().as_ref(),
             token_b.key().as_ref()
         ],
@@ -37,7 +36,7 @@ pub fn initialize_pool_handler(ctx: Context<InitializePool>) -> Result<()> {
     pool.token_b_vault = ctx.accounts.token_b_vault.key();
     pool.fee_vault = ctx.accounts.fee_vault.key();
     pool.total_lp = 0;
-    pool.fee = 0;
+    pool.fee = 50; // 0.5% fee
     pool.k = 0;
     pool.bump = ctx.bumps.pool;
     Ok(())

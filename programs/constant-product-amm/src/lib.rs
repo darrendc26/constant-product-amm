@@ -2,8 +2,11 @@
 #![allow(deprecated)]
 use anchor_lang::prelude::*;
 
+pub mod utilities;
 pub mod pool;
 pub mod initialize_pool;
+pub mod add_liquidity;
+pub mod errors;
 
 use initialize_pool::*;
 
